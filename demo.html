@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>可信点击 demo</title>
+<style>
+  :root { color-scheme: dark; --fg:#e6e6e6; --dim:#8b8b8b; --ok:#4ec9a0; --bad:#e06c6c; --line:#2c2c2c; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 24px; background:#141414; color:var(--fg);
+    font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    max-width: 780px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p.lede { color: var(--dim); margin: 0 0 28px; }
+  code { background:#222; padding:1px 5px; border-radius:3px; font-size:.92em; }
+
+  .row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
+  #target {
+    padding: 14px 28px; font-size: 15px; font-weight: 600; cursor: pointer;
+    background:#1f3d33; color:#8ff0cd; border:1px solid #2f6b56; border-radius:8px;
+  }
+  #target:hover { background:#254a3d; }
+  #count { color: var(--ok); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .controls { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+  .controls button {
+    padding:8px 14px; font-size:13px; cursor:pointer; border-radius:6px;
+    background:#222; color:var(--fg); border:1px solid var(--line);
+  }
+  .controls button:hover { background:#2a2a2a; }
+
+  #log {
+    background:#0d0d0d; border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; margin:0; min-height:230px; max-height:340px; overflow:auto;
+    font: 13px/1.65 ui-monospace, Consolas, monospace; white-space:pre-wrap;
+  }
+  #log .ok  { color: var(--ok); }
+  #log .bad { color: var(--bad); }
+  #log .sep { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>为什么 <code>dispatchEvent</code> 会被忽略</h1>
+<p class="lede">
+  下面这个按钮只统计 <code>isTrusted === true</code> 的点击。
+  试试用页面脚本合成一次点击，再用 <code>trusted.mjs</code> 点一次，对比日志。
+</p>
+
+<div class="row">
+  <button id="target">严格按钮</button>
+  <div>真实点击数：<span id="count">0</span></div>
+</div>
+
+<div class="controls">
+  <button id="fake">用 dispatchEvent 合成一次点击</button>
+  <button id="clear">清空日志</button>
+</div>
+
+<pre id="log"></pre>
+
+<script>
+  const target = document.getElementById('target');
+  const logEl  = document.getElementById('log');
+  const countEl = document.getElementById('count');
+  let count = 0;
+
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+  function line(text, cls) {
+    logEl.insertAdjacentHTML('beforeend', cls ? `<span class="${cls}">${esc(text)}</span>\n` : esc(text) + '\n');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // 监听完整的事件链。真实鼠标输入会依次产生这五个；
+  // 而 dispatchEvent(new MouseEvent('click')) 只有最后一个。
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    target.addEventListener(type, (e) => {
+      const trusted = e.isTrusted;
+      if (type === 'click' && !trusted) {
+        line(`✗ ${type.padEnd(12)} isTrusted=false  ← 被忽略`, 'bad');
+      } else if (trusted) {
+        line(`✓ ${type.padEnd(12)} isTrusted=true`);
+      } else {
+        line(`  ${type.padEnd(12)} isTrusted=false（中间事件，本来就不该可信）`, null);
+      }
+      if (type === 'click' && trusted) {
+        countEl.textContent = ++count;
+      }
+    });
+  }
+
+  function syntheticClick() {
+    const r = target.getBoundingClientRect();
+    const init = {
+      bubbles: true, cancelable: true, view: window, button: 0,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+    };
+    line('', null);
+    line('--- 页面脚本合成事件（把五个都补上，看能不能骗过去）---', 'sep');
+    // 连 pointer 事件一起补，尽量模仿真实输入——isTrusted 依然是 false
+    target.dispatchEvent(new PointerEvent('pointerdown', init));
+    target.dispatchEvent(new MouseEvent('mousedown', init));
+    target.dispatchEvent(new PointerEvent('pointerup', init));
+    target.dispatchEvent(new MouseEvent('mouseup', init));
+    target.dispatchEvent(new MouseEvent('click', init));
+    line(`结果：计数还是 ${count}，一个都没算`, 'bad');
+  }
+
+  document.getElementById('fake').addEventListener('click', syntheticClick);
+  document.getElementById('clear').addEventListener('click', () => {
+    logEl.textContent = ''; count = 0; countEl.textContent = '0';
+  });
+
+  line('就绪。先点「合成一次点击」，或者直接跑：', 'sep');
+  line('  node trusted.mjs --url demo.html', 'sep');
+</script>
+</body>
+</html>
